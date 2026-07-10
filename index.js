@@ -9,21 +9,6 @@ const express = require("express");
 const http = require("http");
 const https = require("https");
 
-// Discord.js Integration
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
-
-// Initialize Discord Client
-const discordClient = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
-  ]
-});
-
-// Global Bot instance
-let bot = null;
-
 // ============================================================
 // EXPRESS SERVER - Keep Render/Aternos alive
 // ============================================================
@@ -279,7 +264,6 @@ app.get('/', (req, res) => {
     </html>
   `);
 });
-
 app.get("/tutorial", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -492,26 +476,6 @@ app.get("/health", (req, res) => {
 
 app.get("/ping", (req, res) => res.send("pong"));
 
-// API Endpoint control systems to match the dashboard frontend requests
-app.post("/start", (req, res) => {
-  if (botState.connected) {
-    return res.json({ success: false, msg: "Bot is already running!" });
-  }
-  initBot();
-  res.json({ success: true });
-});
-
-app.post("/stop", (req, res) => {
-  if (!botState.connected || !bot) {
-    return res.json({ success: false, msg: "Bot is already offline!" });
-  }
-  bot.quit();
-  bot = null;
-  botState.connected = false;
-  addLog("Bot stopped manually via dashboard interface.");
-  res.json({ success: true });
-});
-
 app.get("/logs", (req, res) => {
   const logs = getLogs();
 
@@ -615,4 +579,34 @@ app.get("/logs", (req, res) => {
 
           .log-card-header {
             background: #161b22;
-            border-b
+            border-bottom: 1px solid #21262d;
+            padding: 12px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+
+          .dot { width: 10px; height: 10px; border-radius: 50%; }
+          .dot-red   { background: #ff5f57; }
+          .dot-yellow{ background: #ffbd2e; }
+          .dot-green { background: #28c840; }
+
+          .log-card-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: #484f58;
+            margin-left: 4px;
+          }
+
+          .log-body {
+            padding: 16px 18px;
+            max-height: 560px;
+            overflow-y: auto;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12.5px;
+            line-height: 1.7;
+          }
+
+          .log-entry { display: block; padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+          .log-entry.error   { color: #ff7b72; }
+    
