@@ -9,6 +9,21 @@ const express = require("express");
 const http = require("http");
 const https = require("https");
 
+// Discord.js Integration
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+
+// Initialize Discord Client
+const discordClient = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+// Global Bot instance
+let bot = null;
+
 // ============================================================
 // EXPRESS SERVER - Keep Render/Aternos alive
 // ============================================================
@@ -264,6 +279,7 @@ app.get('/', (req, res) => {
     </html>
   `);
 });
+
 app.get("/tutorial", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -476,6 +492,26 @@ app.get("/health", (req, res) => {
 
 app.get("/ping", (req, res) => res.send("pong"));
 
+// Dashboard Control Endpoints
+app.post("/start", (req, res) => {
+  if (botState.connected) {
+    return res.json({ success: false, msg: "Bot is already running!" });
+  }
+  initBot();
+  res.json({ success: true });
+});
+
+app.post("/stop", (req, res) => {
+  if (!botState.connected || !bot) {
+    return res.json({ success: false, msg: "Bot is already offline!" });
+  }
+  bot.quit();
+  bot = null;
+  botState.connected = false;
+  addLog("Bot stopped manually via dashboard interface.");
+  res.json({ success: true });
+});
+
 app.get("/logs", (req, res) => {
   const logs = getLogs();
 
@@ -609,4 +645,162 @@ app.get("/logs", (req, res) => {
 
           .log-entry { display: block; padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
           .log-entry.error   { color: #ff7b72; }
+        </style>
+      </head>
+      <body>
+        <main>
+          <a href="/" class="back-btn">&#8592; Back to Dashboard</a>
+          <div class="page-header">
+            <div class="page-header-left">
+              <h1>System Logs</h1>
+              <p>Real-time updates and runtime logs</p>
+            </div>
+            <div class="badge">${logCount} entries logged</div>
+          </div>
+          <div class="log-card">
+            <div class="log-card-header">
+              <div class="dot dot-red"></div>
+              <div class="dot dot-yellow"></div>
+              <div class="dot dot-green"></div>
+              <span class="log-card-title">live_output.log</span>
+            </div>
+            <div class="log-body">
+              ${logs.map(log => `<span class="log-entry">${escapeHTML(log)}</span>`).join('')}
+            </div>
+          </div>
+        </main>
+      </body>
+    </html>
+  `);
+});
+
+// ============================================================
+// MINECFLAYER BOT FACTORY SYSTEM
+// ============================================================
+function initBot() {
+  if (bot) return;
+
+  addLog(`Attempting to join server: ${config.server.ip}:${config.server.port}`);
+  
+  bot = mineflayer.createBot({
+    host: config.server.ip,
+    port: parseInt(config.server.port),
+    username: config.bot.username,
+    version: config.server.version || false,
+    auth: "offline"
+  });
+
+  bot.loadPlugin(pathfinder);
+
+  bot.on("spawn", () => {
+    botState.connected = true;
+    botState.reconnectAttempts = 0;
+    addLog(`✨ Bot spawned successfully in world as ${bot.username}`);
+  });
+
+  bot.on("end", (reason) => {
+    botState.connected = false;
+    bot = null;
+    addLog(`🔌 Disconnected from server. Reason: ${reason}`);
     
+    // Auto reconnection fallback logic
+    setTimeout(() => {
+      botState.reconnectAttempts++;
+      addLog(`🔄 Attempting auto-reconnect (#${botState.reconnectAttempts})...`);
+      initBot();
+    }, 10000);
+  });
+
+  bot.on("error", (err) => {
+    addLog(`❌ Mineflayer Error: ${err.message}`);
+    botState.errors.push(err.message);
+  });
+}
+
+// ============================================================
+// DISCORD INTERACTIVE PANEL CONTROL SYSTEM
+// ============================================================
+discordClient.once('ready', () => {
+  addLog(`🤖 Discord interface active as ${discordClient.user.tag}`);
+});
+
+discordClient.on('messageCreate', async (message) => {
+  if (message.content === '!setup-panel') {
+    if (!message.member.permissions.has('Administrator')) {
+      return message.reply("You need administrator permissions to install this control panel.");
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle('🎮 Minecraft Bot Control Panel')
+      .setDescription(`Manage your 24/7 client directly via Discord. Ready to run alongside external monitors.`)
+      .addFields(
+        { name: 'Target Server', value: `\`${config.server.ip}:${config.server.port}\``, inline: true },
+        { name: 'Bot Account', value: `\`${config.bot.username}\``, inline: true }
+      )
+      .setColor('#238636')
+      .setFooter({ text: 'AFK Bot System Integration Engine' });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('dc_start_mc').setLabel('Start Bot').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('dc_stop_mc').setLabel('Stop Bot').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('dc_status_mc').setLabel('Status Check').setStyle(ButtonStyle.Primary)
+    );
+
+    await message.channel.send({ embeds: [embed], components: [row] });
+    await message.delete();
+  }
+});
+
+discordClient.on('interactionCreate', async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  if (interaction.customId === 'dc_start_mc') {
+    if (botState.connected) {
+      await interaction.reply({ content: '⚠️ The Minecraft client wrapper is already running.', ephemeral: true });
+    } else {
+      initBot();
+      await interaction.reply({ content: '🔄 Initialization packet dispatched to Minecraft server.', ephemeral: true });
+    }
+  } 
+  
+  else if (interaction.customId === 'dc_stop_mc') {
+    if (!botState.connected || !bot) {
+      await interaction.reply({ content: '⚠️ Core engine states the bot is already offline.', ephemeral: true });
+    } else {
+      bot.quit();
+      bot = null;
+      botState.connected = false;
+      addLog("Bot forcefully disconnected via Discord integration panel components.");
+      await interaction.reply({ content: '🛑 Connection dropped. Client safely disconnected.', ephemeral: true });
+    }
+  } 
+  
+  else if (interaction.customId === 'dc_status_mc') {
+    const status = botState.connected ? '🟢 Running & Online' : '🔴 Suspended / Offline';
+    let details = `**Status:** ${status}\n**Reconnect Chain:** Attempt #${botState.reconnectAttempts}`;
+    
+    if (bot && bot.entity) {
+      const { x, y, z } = bot.entity.position;
+      details += `\n**Coordinates:** X: ${Math.floor(x)} | Y: ${Math.floor(y)} | Z: ${Math.floor(z)}`;
+    }
+
+    await interaction.reply({ content: details, ephemeral: true });
+  }
+});
+
+// ============================================================
+// SYSTEM STARTUP ORDER
+// ============================================================
+app.listen(PORT, () => {
+  addLog(`🖥️ Web UI Dashboard pipeline initialized on port ${PORT}`);
+});
+
+if (process.env.DISCORD_TOKEN) {
+  discordClient.login(process.env.DISCORD_TOKEN).catch(err => {
+    addLog(`❌ Failed to login to Discord: ${err.message}`);
+  });
+} else {
+  addLog("⚠️ DISCORD_TOKEN missing in environmental ecosystem. Running without Discord Panel.");
+}
+
+initBot();
