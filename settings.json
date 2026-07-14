@@ -6,8 +6,8 @@
     "type": "offline"
   },
   "server": {
-    "ip": "OneBlockChallange.aternos.me",
-    "port": 36101,
+    "ip": "smpftp.play.hosting",
+    "port": 7046,
     "version": "1.21.11",
     "try-creative": false
   },
